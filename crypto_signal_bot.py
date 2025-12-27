@@ -7,6 +7,7 @@ de compra em tendência de alta com suportes/resistências e risco/retorno.
 """
 
 import json
+import time
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple
 
@@ -19,6 +20,7 @@ class CryptoSignalBot:
     def __init__(self):
         """Inicializa o bot com configurações padrão."""
         self.base_url = "https://api.binance.com/api/v3"
+        self.session = requests.Session()
         self.last_analyses: List[Dict] = []
         self.interval = "1d"
         self.last_run_at = None
@@ -50,45 +52,46 @@ class CryptoSignalBot:
         Returns:
             DataFrame com OHLCV data
         """
-        try:
-            endpoint = f"{self.base_url}/klines"
-            params = {"symbol": symbol, "interval": interval, "limit": limit}
-
-            response = requests.get(endpoint, params=params, timeout=10)
-            response.raise_for_status()
-            data = response.json()
-
-            df = pd.DataFrame(
-                data,
-                columns=[
-                    "Open Time",
-                    "Open",
-                    "High",
-                    "Low",
-                    "Close",
-                    "Volume",
-                    "Close Time",
-                    "Quote Volume",
-                    "Trades",
-                    "Taker Buy Base",
-                    "Taker Buy Quote",
-                    "Ignore",
-                ],
-            )
-
-            # Converter para numéricos
-            df["Open"] = df["Open"].astype(float)
-            df["High"] = df["High"].astype(float)
-            df["Low"] = df["Low"].astype(float)
-            df["Close"] = df["Close"].astype(float)
-            df["Volume"] = df["Volume"].astype(float)
-            df["Open Time"] = pd.to_datetime(df["Open Time"], unit="ms")
-
-            return df.sort_values("Open Time").reset_index(drop=True)
-
-        except Exception as e:  # noqa: BLE001
-            print(f"❌ Erro ao buscar {symbol}: {e}")
-            return pd.DataFrame()
+        endpoint = f"{self.base_url}/klines"
+        params = {"symbol": symbol, "interval": interval, "limit": limit}
+        last_err = None
+        for attempt in range(3):
+            try:
+                response = self.session.get(endpoint, params=params, timeout=10)
+                response.raise_for_status()
+                data = response.json()
+                df = pd.DataFrame(
+                    data,
+                    columns=[
+                        "Open Time",
+                        "Open",
+                        "High",
+                        "Low",
+                        "Close",
+                        "Volume",
+                        "Close Time",
+                        "Quote Volume",
+                        "Trades",
+                        "Taker Buy Base",
+                        "Taker Buy Quote",
+                        "Ignore",
+                    ],
+                )
+                df["Open"] = df["Open"].astype(float)
+                df["High"] = df["High"].astype(float)
+                df["Low"] = df["Low"].astype(float)
+                df["Close"] = df["Close"].astype(float)
+                df["Volume"] = df["Volume"].astype(float)
+                df["Open Time"] = pd.to_datetime(df["Open Time"], unit="ms")
+                return df.sort_values("Open Time").reset_index(drop=True)
+            except requests.HTTPError as e:
+                status = e.response.status_code if e.response else "http"
+                last_err = f"HTTP {status}"
+            except Exception as e:  # noqa: BLE001
+                last_err = str(e)
+            time.sleep(1 + attempt)
+        print(f"❌ Erro ao buscar {symbol}: {last_err}")
+        return pd.DataFrame()
 
     def calculate_ema(self, df: pd.DataFrame, period: int, col: str = "Close") -> pd.Series:
         """Calcula Média Móvel Exponencial."""
