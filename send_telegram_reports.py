@@ -127,6 +127,12 @@ def main():
         help="Qual relatório enviar",
     )
     parser.add_argument(
+        "--stocks-region",
+        choices=["all", "us", "eu"],
+        default="all",
+        help="Rodar ações por região para reduzir tempo (all/us/eu)",
+    )
+    parser.add_argument(
         "--summary-only",
         action="store_true",
         help="Enviar apenas o resumo (sem sinais detalhados) para reduzir tamanho/tempo",
@@ -155,7 +161,7 @@ def main():
             messages.append("📈 CRYPTO REPORT\n" + text)
 
     if args.mode in ("stocks", "both"):
-        stock_bot = StockSignalBot()
+        stock_bot = StockSignalBot(region=args.stocks_region)
         if args.signals_only:
             out, signals = run_signals_only(stock_bot, Path("stock_trades.json"))
             messages.append("📊 STOCK SIGNALS\n" + out)

@@ -20,6 +20,7 @@ class StockSignalBot:
     pairs: Dict[str, List[str]] = field(default_factory=dict)
     last_analyses: List[Dict] = field(default_factory=list)
     custom_tickers: List[str] = field(default_factory=list)
+    region: str = "all"  # "all", "us", "eu"
 
     def __post_init__(self):
         if not self.pairs:
@@ -57,6 +58,11 @@ class StockSignalBot:
                     "AZN.L",   # AstraZeneca
                 ],
             }
+        if self.region.lower() == "us":
+            self.pairs = {k: v for k, v in self.pairs.items() if k != "EUROPE"}
+        elif self.region.lower() == "eu":
+            self.pairs = {k: v for k, v in self.pairs.items() if k == "EUROPE"}
+
         self.base_tickers = [t for ts in self.pairs.values() for t in ts]
         self.all_tickers = list(self.base_tickers)
 
