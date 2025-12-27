@@ -47,6 +47,7 @@ def run_and_capture(bot) -> str:
         bot.run()
     return buf.getvalue()
 
+
 def run_summary_only(bot) -> str:
     buf = io.StringIO()
     # Executa apenas o scan e o resumo, sem imprimir sinais detalhados
@@ -55,6 +56,33 @@ def run_summary_only(bot) -> str:
         bot.scan_all_pairs(verbose=False)
         bot.print_analysis_summary()
     return buf.getvalue()
+
+
+def format_signal_compact(a: dict, updated_at: str, timeframe_fallback: str) -> str:
+    tf = a.get("timeframe", timeframe_fallback)
+    conf = a.get("confidence", 0)
+    strength = a.get("signal_strength", "")
+    price = a.get("price", 0)
+    rsi = a.get("rsi", 0)
+    vol = a.get("volume_increase", 0)
+    adx = a.get("adx", 0)
+    macd = "MACD+" if a.get("macd_positive") else "MACD-"
+    if a.get("macd_crossover"):
+        macd += " x↑"
+    ema200_dir = "↑" if a.get("in_uptrend") else "↓"
+    ratio = a.get("ratio_tp1", 0)
+    line1 = f"• {a.get('symbol')} [{tf}] — Conf {conf}/100 {strength} | {updated_at}"
+    line2 = (
+        f"  Preço {price:.2f} | EMA200 {ema200_dir} | RSI {rsi:.1f} | {macd} | "
+        f"Vol {vol:+.0f}% | ADX {adx:.0f}"
+    )
+    line3 = (
+        f"  Entrada {a.get('entry', 0):.2f} | Stop {a.get('stop_loss', 0):.2f} | "
+        f"TP1 {a.get('tp1', 0):.2f} | TP2 {a.get('tp2', 0):.2f} | R/R {ratio:.2f}"
+    )
+    line4 = f"  Sup {a.get('support', 0):.2f} | Res {a.get('resistance', 0):.2f}"
+    return "\n".join([line1, line2, line3, line4])
+
 
 def run_signals_only(bot, tracker_path: Path):
     from trade_tracker import TradeTracker
@@ -83,7 +111,8 @@ def run_signals_only(bot, tracker_path: Path):
         if new_signals:
             print(f"Sinais encontrados: {len(new_signals)}")
             for sig in new_signals:
-                bot.print_signal(sig)
+                print(format_signal_compact(sig, bot.last_run_at, bot.interval))
+                print()
         elif not updates:
             print("Sem sinais hoje.")
     return buf.getvalue(), signals if "signals" in locals() else []
