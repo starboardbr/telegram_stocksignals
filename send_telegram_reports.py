@@ -23,7 +23,6 @@ from typing import List
 import requests
 import pandas as pd
 
-from crypto_signal_bot import CryptoSignalBot
 from stock_signal_bot import StockSignalBot
 
 
@@ -122,9 +121,9 @@ def main():
     parser = argparse.ArgumentParser(description="Enviar relatórios dos bots via Telegram")
     parser.add_argument(
         "--mode",
-        choices=["crypto", "stocks", "both"],
-        default="both",
-        help="Qual relatório enviar",
+        choices=["stocks"],
+        default="stocks",
+        help="Qual relatório enviar (apenas ações nesta versão)",
     )
     parser.add_argument(
         "--stocks-region",
@@ -135,12 +134,12 @@ def main():
     parser.add_argument(
         "--summary-only",
         action="store_true",
-        help="Enviar apenas o resumo (sem sinais detalhados) para reduzir tamanho/tempo",
+        help="(Ignorado) — apenas ações com sinais",
     )
     parser.add_argument(
         "--signals-only",
         action="store_true",
-        help="Enviar apenas sinais (se existirem), sem logs nem resumo",
+        help="(Padrão) — apenas sinais (se existirem), sem logs nem resumo",
     )
     args = parser.parse_args()
 
@@ -151,23 +150,9 @@ def main():
         sys.exit(1)
 
     messages = []
-    if args.mode in ("crypto", "both"):
-        crypto_bot = CryptoSignalBot()
-        if args.signals_only:
-            out, signals = run_signals_only(crypto_bot, Path("crypto_trades.json"))
-            messages.append("📈 CRYPTO SIGNALS\n" + out)
-        else:
-            text = run_summary_only(crypto_bot) if args.summary_only else run_and_capture(crypto_bot)
-            messages.append("📈 CRYPTO REPORT\n" + text)
-
-    if args.mode in ("stocks", "both"):
-        stock_bot = StockSignalBot(region=args.stocks_region)
-        if args.signals_only:
-            out, signals = run_signals_only(stock_bot, Path("stock_trades.json"))
-            messages.append("📊 STOCK SIGNALS\n" + out)
-        else:
-            text = run_summary_only(stock_bot) if args.summary_only else run_and_capture(stock_bot)
-            messages.append("📊 STOCKS REPORT\n" + text)
+    stock_bot = StockSignalBot(region=args.stocks_region)
+    out, _signals = run_signals_only(stock_bot, Path("stock_trades.json"))
+    messages.append("📊 STOCK SIGNALS\n" + out)
 
     full_message = "\n\n".join(messages)
     send_telegram_message(token, chat_id, full_message)
