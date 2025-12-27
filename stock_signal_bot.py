@@ -41,7 +41,7 @@ class StockSignalBot:
                     "TTE.PA",  # TotalEnergies
                     "AIR.PA",  # Airbus
                     "ASML.AS", # ASML
-                    "SHEL.AS", # Shell
+                    "SHEL.L",  # Shell
                     "SAP.DE",  # SAP
                     "SIE.DE",  # Siemens
                     "DTE.DE",  # Deutsche Telekom
