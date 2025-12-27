@@ -1,0 +1,2 @@
+5 0 * * * cd /Users/thiago/Robo_crypto && TELEGRAM_BOT_TOKEN=8053471785:AAH2WksETFmMVu_D8npmyk4TcdvNuJW2qeI TELEGRAM_CHAT_ID=-1003544032155 /usr/bin/python3 send_telegram_reports.py --mode both --signals-only
+5 12 * * * cd /Users/thiago/Robo_crypto && TELEGRAM_BOT_TOKEN=8053471785:AAH2WksETFmMVu_D8npmyk4TcdvNuJW2qeI TELEGRAM_CHAT_ID=-1003544032155 /usr/bin/python3 send_telegram_reports.py --mode both --signals-only
