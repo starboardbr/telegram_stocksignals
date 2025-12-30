@@ -43,6 +43,8 @@ class TradeTracker:
                 "status": "open",
                 "created_at": created_at,
                 "last_update": created_at,
+                "last_price": analysis["price"],
+                "pnl_pct": 0.0,
             }
         )
 
@@ -54,6 +56,8 @@ class TradeTracker:
                 continue
             price = a["price"]
             status = trade["status"]
+            trade["last_price"] = price
+            trade["pnl_pct"] = (price / trade["entry"] - 1) * 100
             if status in ("tp2", "stopped"):
                 continue
             new_status = status
