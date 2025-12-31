@@ -8,6 +8,7 @@ Use:
 Cole o texto do sinal e clique em "Executar (simulação)".
 """
 
+import os
 import re
 import tkinter as tk
 from tkinter import ttk
