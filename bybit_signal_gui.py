@@ -95,9 +95,10 @@ class BybitTrader:
             return msg + " (dry-run)"
 
         try:
+            sym = symbol
             self.client.place_order(
                 category="linear",
-                symbol=string_value := symbol,
+                symbol=sym,
                 side="Buy",
                 orderType="Market",
                 qty=round(qty, 4),
@@ -108,14 +109,14 @@ class BybitTrader:
             for tgt in targets:
                 self.client.place_order(
                     category="linear",
-                    symbol=string_value,
+                    symbol=sym,
                     side="Sell",
                     orderType="Limit",
                     qty=round(part_qty, 4),
                     price=round(tgt, 4),
                     reduceOnly=True,
                 )
-            self.client.set_trading_stop(category="linear", symbol=string_value, stopLoss=round(stop, 4))
+            self.client.set_trading_stop(category="linear", symbol=sym, stopLoss=round(stop, 4))
             return msg + " (ordens enviadas para testnet)"
         except Exception as e:  # noqa: BLE001
             return f"{msg} | erro: {e}"
