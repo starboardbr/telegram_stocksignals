@@ -1,20 +1,17 @@
 #!/usr/bin/env python3
 """
-Bot para ler sinais do canal do Telegram e (opcionalmente) enviar ordens na Bybit.
-Fluxo:
- 1) Usa Telethon para ler mensagens recentes do canal.
- 2) Faz parse de sinais no formato:
-    #STORJ / USDT CONFIGURAÇÃO DE COMPRA (ARRISCADO)
-    Entrada: 0.1465
-    Alavancagem: Máx. 10x-20x
-    Alvos: 3% - 20% - 40% ...
-    Stop Loss: Hold
- 3) Gera planos de trade e (se configurado) envia ordens de mercado + TPs na Bybit.
-Por padrão está em dry-run (não envia ordens). Configure as variáveis de ambiente para operar:
-  TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION (nome do arquivo da sessão)
-  TELEGRAM_CHANNEL (username ou link, ex.: https://t.me/+u8_FXC7Wdg04ZDIx)
-  BYBIT_API_KEY, BYBIT_API_SECRET (opcional; se ausentes, dry-run)
-  DEFAULT_LEVERAGE (ex.: 10), POSITION_SIZE_USDT (ex.: 50)
+Bot para ler sinais do canal do Telegram e simular/enviar ordens na Bybit (testnet por padrão).
+
+Variáveis de ambiente:
+  TELEGRAM_API_ID, TELEGRAM_API_HASH, TELEGRAM_SESSION (ex.: tg_session), TELEGRAM_CHANNEL
+  BYBIT_API_KEY, BYBIT_API_SECRET (opcionais; se ausentes ou BYBIT_DRY_RUN=true, roda em simulação)
+  BYBIT_DRY_RUN=true|false (default true)
+  DEFAULT_LEVERAGE=10 (valor seguro se o sinal trouxer faixa)
+  POSITION_SIZE_USDT=50 (tamanho da posição)
+
+Uso:
+  python3 bybit_signal_bot.py          # lê últimas mensagens do canal e processa novos sinais
+  BYBIT_DRY_RUN=false python3 bybit_signal_bot.py   # envia ordens na testnet
 """
 
 import asyncio
@@ -27,12 +24,11 @@ from pathlib import Path
 from typing import List, Optional
 
 from telethon import TelegramClient
-from telethon.tl.types import PeerChannel
 
 try:
     from pybit.unified_trading import HTTP  # type: ignore
 except Exception:
-    HTTP = None  # pybit opcional; se ausente, roda dry-run
+    HTTP = None
 
 
 SIGNALS_FILE = Path("bybit_signals.json")
@@ -43,7 +39,7 @@ class Signal:
     symbol: str
     entry: float
     targets: List[float]
-    stop: Optional[float]  # None para Hold
+    stop: Optional[float]
     leverage: Optional[float]
     raw_leverage: str
     text: str
@@ -57,9 +53,7 @@ class TelegramSignalListener:
 
     async def fetch_messages(self, limit: int = 20) -> List[str]:
         await self.client.start()
-        entity = self.channel
-        if self.channel.startswith("http"):
-            entity = await self.client.get_entity(self.channel)
+        entity = await self.client.get_entity(self.channel)
         msgs = await self.client.get_messages(entity, limit=limit)
         return [m.message for m in msgs if m.message]
 
@@ -73,7 +67,6 @@ class SignalParser:
 
     @staticmethod
     def parse_targets(text: str, entry: float) -> List[float]:
-        # Converte lista de percentuais em preços (assume % acima da entrada)
         parts = re.split(r"[,-]\s*", text)
         targets = []
         for p in parts:
@@ -98,11 +91,8 @@ class SignalParser:
         symbol = sym_m.group(1).upper() + "USDT"
         entry = float(entry_m.group(1))
         leverage_txt = lev_m.group(1).strip() if lev_m else ""
-        # Escolhe um valor seguro se vier faixa
-        leverage_val = None
         lev_num = re.search(r"(\d+)", leverage_txt)
-        if lev_num:
-            leverage_val = float(lev_num.group(1))
+        leverage_val = float(lev_num.group(1)) if lev_num else None
         targets = self.parse_targets(targets_m.group(1), entry) if targets_m else []
         stop_val = None
         if stop_m:
@@ -152,32 +142,30 @@ class SignalStore:
 
 class BybitTrader:
     def __init__(self, api_key: Optional[str], api_secret: Optional[str], dry_run: bool = True):
-        self.api_key = api_key
-        self.api_secret = api_secret
         self.dry_run = dry_run or not (api_key and api_secret and HTTP)
         self.client = None
         if not self.dry_run and HTTP:
-            self.client = HTTP(
-                testnet=False,
-                api_key=api_key,
-                api_secret=api_secret,
-            )
+            self.client = HTTP(testnet=True, api_key=api_key, api_secret=api_secret)
 
     def ensure_symbol(self, symbol: str) -> bool:
-        # Para simplicidade, assume que symbol já é válido; poderia consultar exchange info.
         return symbol.endswith("USDT")
 
-    def place_trade(self, sig: Signal, size_usdt: float, leverage: float):
+    def place_trade(self, sig: Signal, size_usdt: float, leverage: float, stop_pct_safety: float = 8.0):
         if not self.ensure_symbol(sig.symbol):
             print(f"❌ Símbolo inválido: {sig.symbol}")
             return
         qty = size_usdt / sig.entry / leverage
-        print(f"▶️ Abrindo {sig.symbol} @ {sig.entry:.4f}, qty {qty:.4f}, lev {leverage}x, stop={sig.stop}, targets={sig.targets}")
+        stop = sig.stop if sig.stop is not None else sig.entry * (1 - stop_pct_safety / 100)
+        targets = sig.targets or [sig.entry * 1.02]
+        print(
+            f"▶️ {sig.symbol} entry={sig.entry:.4f} qty={qty:.4f} lev={leverage}x "
+            f"stop={stop:.4f} targets={','.join([f'{t:.4f}' for t in targets])}"
+        )
         if self.dry_run:
             print("Dry-run: nenhuma ordem enviada.")
             return
         try:
-            # Ordem de mercado de entrada
+            # Ordem de mercado
             self.client.place_order(
                 category="linear",
                 symbol=sig.symbol,
@@ -187,23 +175,20 @@ class BybitTrader:
                 timeInForce="IOC",
                 leverage=leverage,
             )
-            # TPs parciais
-            for tgt in sig.targets:
+            # TPs
+            part_qty = qty / max(len(targets), 1)
+            for tgt in targets:
                 self.client.place_order(
                     category="linear",
                     symbol=sig.symbol,
                     side="Sell",
                     orderType="Limit",
-                    qty=round(qty / max(len(sig.targets), 1), 4),
+                    qty=round(part_qty, 4),
                     price=round(tgt, 4),
                     reduceOnly=True,
                 )
-            if sig.stop:
-                self.client.set_trading_stop(
-                    category="linear",
-                    symbol=sig.symbol,
-                    stopLoss=round(sig.stop, 4),
-                )
+            # Stop
+            self.client.set_trading_stop(category="linear", symbol=sig.symbol, stopLoss=round(stop, 4))
         except Exception as e:  # noqa: BLE001
             print(f"❌ Erro ao enviar ordens: {e}")
 
@@ -222,8 +207,6 @@ async def main():
     store = SignalStore(SIGNALS_FILE)
 
     messages = await listener.fetch_messages(limit=30)
-    print(f"ℹ️ Mensagens lidas: {len(messages)}")
-
     new_signals = []
     for msg in messages:
         sig = parser.parse(msg)
@@ -242,10 +225,11 @@ async def main():
     )
     size_usdt = float(os.getenv("POSITION_SIZE_USDT", "50"))
     default_lev = float(os.getenv("DEFAULT_LEVERAGE", "10"))
+    stop_pct_safety = float(os.getenv("STOP_PCT_SAFETY", "8.0"))
 
     for sig in new_signals:
         lev = sig.leverage or default_lev
-        trader.place_trade(sig, size_usdt=size_usdt, leverage=lev)
+        trader.place_trade(sig, size_usdt=size_usdt, leverage=lev, stop_pct_safety=stop_pct_safety)
 
 
 if __name__ == "__main__":
