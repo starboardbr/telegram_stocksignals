@@ -138,6 +138,18 @@ class App:
         self.size_var = tk.DoubleVar(value=50.0)
         ttk.Entry(top, textvariable=self.size_var, width=10).pack(side="left", padx=5)
 
+        ttk.Label(top, text="Saldo (USDT):").pack(side="left", padx=(10, 0))
+        self.balance_var = tk.DoubleVar(value=500.0)
+        ttk.Entry(top, textvariable=self.balance_var, width=10).pack(side="left", padx=5)
+
+        ttk.Label(top, text="Posições abertas:").pack(side="left", padx=(10, 0))
+        self.open_pos_var = tk.IntVar(value=0)
+        ttk.Entry(top, textvariable=self.open_pos_var, width=6).pack(side="left", padx=5)
+
+        ttk.Label(top, text="Modo:").pack(side="left", padx=(10, 0))
+        self.mode_var = tk.StringVar(value="safe")
+        ttk.Combobox(top, textvariable=self.mode_var, values=["safe", "high_risk"], width=10, state="readonly").pack(side="left")
+
         ttk.Label(top, text="Alavancagem padrão:").pack(side="left")
         self.lev_var = tk.DoubleVar(value=10.0)
         ttk.Entry(top, textvariable=self.lev_var, width=6).pack(side="left", padx=5)
@@ -174,7 +186,31 @@ class App:
             self.output.insert(tk.END, f"Erro de parse: {err}\n")
             return
 
-        size = self.size_var.get()
+        # sizing baseado nas regras
+        balance = self.balance_var.get()
+        base_size = self.size_var.get()
+        pct = 0.01 if balance < 1000 else 0.005
+        size_rule = balance * pct
+        size = min(base_size, size_rule)
+        # limite de posições
+        open_pos = self.open_pos_var.get()
+        limit = 20
+        if balance <= 100:
+            limit = 5
+        elif balance <= 200:
+            limit = 8
+        elif balance <= 300:
+            limit = 13
+        elif balance <= 400:
+            limit = 18
+        elif balance <= 500:
+            limit = 30
+        else:
+            limit = 20
+        if open_pos >= limit:
+            self.output.insert(tk.END, f"Limite de posições atingido ({open_pos}/{limit}). Nenhuma ordem enviada.\n")
+            return
+
         leverage = parsed["leverage"] or self.lev_var.get()
         entry = parsed["entry"]
         qty = size / entry / leverage
@@ -184,16 +220,36 @@ class App:
             stop = entry * (1 - self.stop_pct_var.get() / 100)
 
         targets = parsed["targets"] or [entry * 1.02]
-        pct_per_target = 1 / len(targets) if targets else 1
+        mode = self.mode_var.get()
+        # splits por modo
+        if mode == "safe":
+            weights = [0.50, 0.15, 0.10, 0.05, 0.05, 0.05, 0.05, 0.05]
+        elif mode == "high_risk":
+            weights = [0.50]  # TP5 50% e resto segurando; usamos primeiro alvo
+        else:
+            weights = [1.0]
+        # normalizar pesos conforme quantidade de targets disponível
+        if len(targets) < len(weights):
+            weights = weights[: len(targets)]
+        if len(weights) < len(targets):
+            # se mais targets do que pesos, dividir restante igualmente
+            rem = len(targets) - len(weights)
+            weights += [ (1 - sum(weights)) / rem ] * rem
+        # renormaliza para 1
+        total_w = sum(weights)
+        if total_w == 0:
+            weights = [1 / len(targets)] * len(targets)
+            total_w = 1
+        weights = [w / total_w for w in weights]
 
         lines = [
             f"SINAL: {parsed['symbol']} | Entrada: {entry:.4f}",
-            f"Alavancagem: {leverage}x | Tamanho: {size} USDT | Qty: {qty:.4f}",
+            f"Alavancagem: {leverage}x | Tamanho: {size:.2f} USDT (regra {pct*100:.1f}% saldo={balance}) | Qty: {qty:.4f}",
             f"Stop: {stop:.4f}",
             "Alvos:",
         ]
-        for i, t in enumerate(targets, 1):
-            lines.append(f"  TP{i}: {t:.4f} (parcelas {pct_per_target*100:.1f}% da posição)")
+        for i, (t, w) in enumerate(zip(targets, weights), 1):
+            lines.append(f"  TP{i}: {t:.4f} (parcela {w*100:.1f}%)")
 
         send_orders = self.live_var.get()
         lines.append(f"\nEnvio de ordens: {'SIM (testnet)' if send_orders else 'NÃO, apenas simulação'}")
